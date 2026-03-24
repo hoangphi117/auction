@@ -9,6 +9,8 @@ import * as autoBiddingModel from '../models/autoBidding.model.js';
 import { isAuthenticated } from '../middlewares/auth.mdw.js';
 import { sendMail } from '../utils/mailer.js';
 
+import { PaginationHelper } from '../utils/pagination.js';
+
 const router = express.Router();
 
 function generateOtp() {
@@ -536,26 +538,21 @@ router.post('/request-upgrade', isAuthenticated, async (req, res) => {
   }
 });
 router.get('/watchlist', isAuthenticated ,async (req, res) => {
-  const limit = 3;
-  const page = parseInt(req.query.page) || 1;
-  const offset = (page - 1) * limit;
-  // Implementation for watchlist route
   const currentUserId = req.session.authUser.id;
-  const watchlistProducts = await watchlistModel.searchPageByUserId(currentUserId, limit, offset);
-  const total = await watchlistModel.countByUserId(currentUserId);
-  const totalCount = Number(total.count);
-  const nPages = Math.ceil(totalCount / limit);
-  let from = (page - 1) * limit + 1;
-  let to = page * limit;
-  if (to > totalCount) to = totalCount;
-  if (totalCount === 0) { from = 0; to = 0; }
+  
+  const result = await PaginationHelper.paginate(
+    req,
+    (limit, offset) => watchlistModel.searchPageByUserId(currentUserId, limit, offset),
+    () => watchlistModel.countByUserId(currentUserId)
+  );
+  
   res.render('vwAccount/watchlist', {
-    products: watchlistProducts,
-    totalCount,
-    from,
-    to,
-    currentPage: page,
-    totalPages: nPages,
+    products: result.items,
+    totalCount: result.totalCount,
+    from: result.from,
+    to: result.to,
+    currentPage: result.currentPage,
+    totalPages: result.totalPages,
   });
 });
 

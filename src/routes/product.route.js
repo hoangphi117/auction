@@ -20,6 +20,8 @@ import multer from 'multer';
 import path from 'path';
 const router = express.Router();
 
+import { PaginationHelper } from '../utils/pagination.js';
+
 const prepareProductList = async (products) => {
   const now = new Date();
   if (!products) return [];
@@ -43,9 +45,6 @@ router.get('/category', async (req, res) => {
   const userId = req.session.authUser ? req.session.authUser.id : null;
   const sort = req.query.sort || '';
   const categoryId = req.query.catid;
-  const page = parseInt(req.query.page) || 1;
-  const limit = 3;
-  const offset = (page - 1) * limit;
   
   // Check if category is level 1 (parent_id is null)
   const category = await categoryModel.findByCategoryId(categoryId);
@@ -59,23 +58,22 @@ router.get('/category', async (req, res) => {
     categoryIds = [categoryId, ...childIds];
   }
   
-  const list = await productModel.findByCategoryIds(categoryIds, limit, offset, sort, userId);
-  const products = await prepareProductList(list);
-  const total = await productModel.countByCategoryIds(categoryIds);
-  console.log('Total products in category:', total.count);
-  const totalCount = parseInt(total.count) || 0;
-  const nPages = Math.ceil(totalCount / limit);
-  let from = (page - 1) * limit + 1;
-  let to = page * limit;
-  if (to > totalCount) to = totalCount;
-  if (totalCount === 0) { from = 0; to = 0; }
+  const result = await PaginationHelper.paginate(
+    req,
+    (limit, offset) => productModel.findByCategoryIds(categoryIds, limit, offset, sort, userId),
+    () => productModel.countByCategoryIds(categoryIds)
+  );
+  
+  const products = await prepareProductList(result.items);
+  console.log('Total products in category:', result.totalCount);
+  
   res.render('vwProduct/list', { 
     products: products,
-    totalCount,
-    from,
-    to,
-    currentPage: page,
-    totalPages: nPages,
+    totalCount: result.totalCount,
+    from: result.from,
+    to: result.to,
+    currentPage: result.currentPage,
+    totalPages: result.totalPages,
     categoryId: categoryId,
     categoryName: category ? category.name : null,
     sort: sort,
@@ -85,51 +83,41 @@ router.get('/category', async (req, res) => {
 router.get('/search', async (req, res) => {
   const userId = req.session.authUser ? req.session.authUser.id : null;
   const q = req.query.q || '';
-  const logic = req.query.logic || 'and'; // 'and' or 'or'
+  const logic = req.query.logic || 'and';
   const sort = req.query.sort || '';
   
   // If keyword is empty, return empty results
   if (q.length === 0) {
     return res.render('vwProduct/list', {
-        q: q,
-        logic: logic,
-        sort: sort,
-        products: [],
-        totalCount: 0,
-        from: 0,
-        to: 0,
-        currentPage: 1,
-        totalPages: 0,
+      q: q,
+      logic: logic,
+      sort: sort,
+      products: [],
+      totalCount: 0,
+      from: 0,
+      to: 0,
+      currentPage: 1,
+      totalPages: 0,
     });
   }
-
-  const limit = 3;
-  const page = parseInt(req.query.page) || 1;
-  const offset = (page - 1) * limit;
   
-  // Pass keywords directly without modification
-  // plainto_tsquery will handle tokenization automatically
   const keywords = q.trim();
   
-  // Search in both product name and category
-  const list = await productModel.searchPageByKeywords(keywords, limit, offset, userId, logic, sort);
-  const products = await prepareProductList(list);
-  const total = await productModel.countByKeywords(keywords, logic);
-  const totalCount = parseInt(total.count) || 0;
+  const result = await PaginationHelper.paginate(
+    req,
+    (limit, offset) => productModel.searchPageByKeywords(keywords, limit, offset, userId, logic, sort),
+    () => productModel.countByKeywords(keywords, logic)
+  );
   
-  const nPages = Math.ceil(totalCount / limit);
-  let from = (page - 1) * limit + 1;
-  let to = page * limit;
-  if (to > totalCount) to = totalCount;
-  if (totalCount === 0) { from = 0; to = 0; }
+  const products = await prepareProductList(result.items);
   
   res.render('vwProduct/list', { 
     products: products,
-    totalCount,
-    from,
-    to,
-    currentPage: page,
-    totalPages: nPages,
+    totalCount: result.totalCount,
+    from: result.from,
+    to: result.to,
+    currentPage: result.currentPage,
+    totalPages: result.totalPages,
     q: q,
     logic: logic,
     sort: sort,
