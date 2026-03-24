@@ -26,6 +26,7 @@ import adminSystemRouter from './routes/admin/system.route.js';
 import sellerRouter from './routes/seller.route.js';
 // Import Middlewares
 import { isAuthenticated, isSeller, isAdmin } from './middlewares/auth.mdw.js';
+import { flashMessages, flashHelpers } from './middlewares/flash-messages.js';
 import * as categoryModel from './models/category.model.js';
 import * as userModel from './models/user.model.js';
 
@@ -52,6 +53,10 @@ app.use(session({
 // Initialize Passport
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Flash messages middleware
+app.use(flashMessages);
+app.use(flashHelpers);
 
 // ============================================================
 // 2. CẤU HÌNH VIEW ENGINE (Handlebars)
