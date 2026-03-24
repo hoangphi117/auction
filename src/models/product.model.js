@@ -1,5 +1,56 @@
 import db from '../utils/db.js';
 
+// ============================================
+// BASE QUERY BUILDERS - DRY Pattern
+// ============================================
+
+const BASE_SELECT_COLUMNS = [
+  'products.*',
+  db.raw(`mask_name_alternating(users.fullname) AS bidder_name`),
+  db.raw(`(SELECT COUNT(*) FROM bidding_history WHERE bidding_history.product_id = products.id) AS bid_count`)
+];
+
+const WITH_WATCHLIST_SELECT_COLUMNS = (userId) => [
+  ...BASE_SELECT_COLUMNS,
+  db.raw(`watchlists.product_id IS NOT NULL AS is_favorite`)
+];
+
+function baseQuery() {
+  return db('products')
+    .leftJoin('users', 'products.highest_bidder_id', 'users.id');
+}
+
+function withWatchlist(query, userId) {
+  return query.leftJoin('watchlists', function() {
+    this.on('products.id', '=', 'watchlists.product_id')
+      .andOnVal('watchlists.user_id', '=', userId || -1);
+  });
+}
+
+function activeOnly(query) {
+  return query
+    .where('products.end_at', '>', new Date())
+    .whereNull('products.closed_at');
+}
+
+function applySorting(queryBuilder, sort) {
+  if (sort === 'price_asc') {
+    queryBuilder.orderBy('products.current_price', 'asc');
+  } else if (sort === 'price_desc') {
+    queryBuilder.orderBy('products.current_price', 'desc');
+  } else if (sort === 'newest') {
+    queryBuilder.orderBy('products.created_at', 'desc');
+  } else if (sort === 'oldest') {
+    queryBuilder.orderBy('products.created_at', 'asc');
+  } else {
+    queryBuilder.orderBy('products.created_at', 'desc');
+  }
+}
+
+// ============================================
+// EXPORTED FUNCTIONS
+// ============================================
+
 export function findAll() {
   return db('products')
     .leftJoin('users as bidder', 'products.highest_bidder_id', 'bidder.id')
@@ -206,65 +257,10 @@ export function countAll() {
 }
 
 export function findByCategoryId(categoryId, limit, offset, sort, currentUserId) {
-  // currentUserId: ID của người đang xem (nếu chưa đăng nhập thì truyền null hoặc undefined)
-
-  return db('products')
-    .leftJoin('users', 'products.highest_bidder_id', 'users.id')
-    
-    // --- ĐOẠN MỚI THÊM VÀO ---
-    // Join bảng watchlists với điều kiện product_id khớp VÀ user_id phải là người đang xem
-    .leftJoin('watchlists', function() {
-      this.on('products.id', '=', 'watchlists.product_id')
-        .andOnVal('watchlists.user_id', '=', currentUserId || -1); 
-        // Nếu currentUserId là null/undefined (khách vãng lai), dùng -1 để không khớp với ai cả
-    })
-    // --------------------------
-    // đang active
-    // chọn buy now hoặc người đặt giá đặt giá cao hơn giá buy now -> closed_at bằng thời điểm buy, chuyển trạn thái sản phẩm qua pending
-    // pending tức là đang chờ thanh toán
-    // từ pending(is_sold = null) mà thanh toán thành công -> closed_at được cập nhật theo thời điểm thanh toán thành công, is_sold = true
-
+  return activeOnly(withWatchlist(baseQuery(), currentUserId))
     .where('products.category_id', categoryId)
-    // Chỉ hiển thị sản phẩm ACTIVE (chưa kết thúc, chưa đóng)
-    .where('products.end_at', '>', new Date())
-    .whereNull('products.closed_at')
-    .select(
-      'products.*',
-      
-      // Logic che tên người đấu giá (giữ nguyên)
-      db.raw(`mask_name_alternating(users.fullname) AS bidder_name`),
-
-      // Logic đếm số lượt đấu giá (giữ nguyên)
-      db.raw(`
-        (
-          SELECT COUNT(*) 
-          FROM bidding_history 
-          WHERE bidding_history.product_id = products.id
-        ) AS bid_count
-      `),
-
-      // --- ĐOẠN MỚI THÊM VÀO ---
-      // Nếu cột product_id bên bảng watchlists có dữ liệu -> Đã like (True), ngược lại là False
-      db.raw('watchlists.product_id IS NOT NULL AS is_favorite')
-      // --------------------------
-    )
-    .modify((queryBuilder) => {
-      if (sort === 'price_asc') {
-        queryBuilder.orderBy('products.current_price', 'asc');
-      }
-      else if (sort === 'price_desc') {
-        queryBuilder.orderBy('products.current_price', 'desc');
-      }
-      else if (sort === 'newest') {
-        queryBuilder.orderBy('products.created_at', 'desc');
-      }
-      else if (sort === 'oldest') {
-        queryBuilder.orderBy('products.created_at', 'asc');
-      }
-      else {
-        queryBuilder.orderBy('products.created_at', 'desc');
-      }
-    })
+    .select(WITH_WATCHLIST_SELECT_COLUMNS(currentUserId))
+    .modify(applySorting, sort)
     .limit(limit)
     .offset(offset);
 }
@@ -277,45 +273,10 @@ export function countByCategoryId(categoryId) {
 }
 
 export function findByCategoryIds(categoryIds, limit, offset, sort, currentUserId) {
-  return db('products')
-    .leftJoin('users', 'products.highest_bidder_id', 'users.id')
-    .leftJoin('watchlists', function() {
-      this.on('products.id', '=', 'watchlists.product_id')
-        .andOnVal('watchlists.user_id', '=', currentUserId || -1);
-    })
+  return activeOnly(withWatchlist(baseQuery(), currentUserId))
     .whereIn('products.category_id', categoryIds)
-    // Chỉ hiển thị sản phẩm ACTIVE
-    .where('products.end_at', '>', new Date())
-    .whereNull('products.closed_at')
-    .select(
-      'products.*',
-      db.raw(`mask_name_alternating(users.fullname) AS bidder_name`),
-      db.raw(`
-        (
-          SELECT COUNT(*) 
-          FROM bidding_history 
-          WHERE bidding_history.product_id = products.id
-        ) AS bid_count
-      `),
-      db.raw('watchlists.product_id IS NOT NULL AS is_favorite')
-    )
-    .modify((queryBuilder) => {
-      if (sort === 'price_asc') {
-        queryBuilder.orderBy('products.current_price', 'asc');
-      }
-      else if (sort === 'price_desc') {
-        queryBuilder.orderBy('products.current_price', 'desc');
-      }
-      else if (sort === 'newest') {
-        queryBuilder.orderBy('products.created_at', 'desc');
-      }
-      else if (sort === 'oldest') {
-        queryBuilder.orderBy('products.created_at', 'asc');
-      }
-      else {
-        queryBuilder.orderBy('products.created_at', 'desc');
-      }
-    })
+    .select(WITH_WATCHLIST_SELECT_COLUMNS(currentUserId))
+    .modify(applySorting, sort)
     .limit(limit)
     .offset(offset);
 }
