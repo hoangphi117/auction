@@ -1,4 +1,4 @@
-import { sendMail } from './mailer.js';
+import { sendMail } from '../utils/mailer.js';
 
 class EmailService {
   static getBaseEmailTemplate(title, headerColor1, headerColor2, content) {
