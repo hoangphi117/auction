@@ -17,6 +17,7 @@ import { isAuthenticated } from '../middlewares/auth.mdw.js';
 import { sendMail } from '../utils/mailer.js';
 import { PaginationHelper } from '../utils/pagination.js';
 import EmailService from '../services/EmailService.js';
+import { determineProductStatus } from '../utils/product-status.js';
 import db from '../utils/db.js';
 import multer from 'multer';
 import path from 'path';
@@ -138,7 +139,6 @@ router.get('/detail', async (req, res) => {
   // Determine product status
   const now = new Date();
   const endDate = new Date(product.end_at);
-  let productStatus = 'ACTIVE';
   
   // Auto-close auction if time expired and not yet closed
   if (endDate <= now && !product.closed_at && product.is_sold === null) {
@@ -147,18 +147,8 @@ router.get('/detail', async (req, res) => {
     product.closed_at = endDate; // Update local object
   }
   
-  if (product.is_sold === true) {
-    productStatus = 'SOLD';
-  } else if (product.is_sold === false) {
-    productStatus = 'CANCELLED';
-  } else if ((endDate <= now || product.closed_at) && product.highest_bidder_id) {
-    productStatus = 'PENDING';
-  } else if (endDate <= now && !product.highest_bidder_id) {
-    productStatus = 'EXPIRED';
-  } else if (endDate > now && !product.closed_at) {
-    productStatus = 'ACTIVE';
-  }
-
+  const productStatus = determineProductStatus(product);
+  
   // Authorization check: Non-ACTIVE products can only be viewed by seller or highest bidder
   if (productStatus !== 'ACTIVE') {
     if (!userId) {
@@ -831,19 +821,7 @@ router.get('/complete-order', isAuthenticated, async (req, res) => {
   }
   
   // Determine product status
-  const now = new Date();
-  const endDate = new Date(product.end_at);
-  let productStatus = 'ACTIVE';
-  
-  if (product.is_sold === true) {
-    productStatus = 'SOLD';
-  } else if (product.is_sold === false) {
-    productStatus = 'CANCELLED';
-  } else if ((endDate <= now || product.closed_at) && product.highest_bidder_id) {
-    productStatus = 'PENDING';
-  } else if (endDate <= now && !product.highest_bidder_id) {
-    productStatus = 'EXPIRED';
-  }
+  const productStatus = determineProductStatus(product);
   
   // Only PENDING products can access this page
   if (productStatus !== 'PENDING') {
