@@ -140,15 +140,64 @@ export function findPage(limit, offset) {
     ).limit(limit).offset(offset);
 }
 
+function normalizeKeywords(keywords) {
+  return (keywords || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+}
+
+function parseSearchWords(searchQuery) {
+  return searchQuery.split(/\s+/).filter(w => w.length > 0);
+}
+
+function applyKeywordFilter(builder, words, logic = 'or') {
+  if (logic === 'and') {
+    words.forEach(word => {
+      builder.where(function() {
+        this.whereRaw(`LOWER(remove_accents(products.name)) LIKE ?`, [`%${word}%`])
+          .orWhereRaw(`LOWER(remove_accents(categories.name)) LIKE ?`, [`%${word}%`])
+          .orWhereRaw(`LOWER(remove_accents(parent_category.name)) LIKE ?`, [`%${word}%`]);
+      });
+    });
+    return;
+  }
+
+  words.forEach((word, index) => {
+    const method = index === 0 ? 'where' : 'orWhere';
+    builder[method](function() {
+      this.whereRaw(`LOWER(remove_accents(products.name)) LIKE ?`, [`%${word}%`])
+        .orWhereRaw(`LOWER(remove_accents(categories.name)) LIKE ?`, [`%${word}%`])
+        .orWhereRaw(`LOWER(remove_accents(parent_category.name)) LIKE ?`, [`%${word}%`]);
+    });
+  });
+}
+
+function applySearchSort(query, sort = '') {
+  if (sort === 'price_asc') {
+    return query.orderBy('products.current_price', 'asc');
+  }
+  if (sort === 'price_desc') {
+    return query.orderBy('products.current_price', 'desc');
+  }
+  if (sort === 'newest') {
+    return query.orderBy('products.created_at', 'desc');
+  }
+  if (sort === 'oldest') {
+    return query.orderBy('products.created_at', 'asc');
+  }
+
+  // Default: ending soonest first
+  return query.orderBy('products.end_at', 'asc');
+}
+
 // 1. Hàm tìm kiếm phân trang (Simplified FTS - Search in product name and category)
 export function searchPageByKeywords(keywords, limit, offset, userId, logic = 'or', sort = '') {
-  // Remove accents from keywords for search
-  const searchQuery = keywords.toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
-    .replace(/đ/g, 'd').replace(/Đ/g, 'D'); // Vietnamese d
+  const searchQuery = normalizeKeywords(keywords);
+  const words = parseSearchWords(searchQuery);
   
-  let query = db('products')
+  const query = db('products')
     .leftJoin('categories', 'products.category_id', 'categories.id')
     .leftJoin('categories as parent_category', 'categories.parent_id', 'parent_category.id')
     .leftJoin('users', 'products.highest_bidder_id', 'users.id')
@@ -159,29 +208,7 @@ export function searchPageByKeywords(keywords, limit, offset, userId, logic = 'o
     // Chỉ hiển thị sản phẩm ACTIVE
     .where('products.end_at', '>', new Date())
     .whereNull('products.closed_at')
-    .where((builder) => {
-      const words = searchQuery.split(/\s+/).filter(w => w.length > 0);
-      if (logic === 'and') {
-        // AND logic: all keywords must match
-        // Split words and each word must exist in product name OR category name OR parent category name
-        words.forEach(word => {
-          builder.where(function() {
-            this.whereRaw(`LOWER(remove_accents(products.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(categories.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(parent_category.name)) LIKE ?`, [`%${word}%`]);
-          });
-        });
-      } else {
-        // OR logic: any keyword can match in product name OR category name OR parent category name
-        words.forEach(word => {
-          builder.orWhere(function() {
-            this.whereRaw(`LOWER(remove_accents(products.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(categories.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(parent_category.name)) LIKE ?`, [`%${word}%`]);
-          });
-        });
-      }
-    })
+    .where((builder) => applyKeywordFilter(builder, words, logic))
     .select(
       'products.*',
       'categories.name as category_name',
@@ -196,30 +223,13 @@ export function searchPageByKeywords(keywords, limit, offset, userId, logic = 'o
       db.raw('watchlists.product_id IS NOT NULL AS is_favorite')
     );
 
-  // Apply sorting
-  if (sort === 'price_asc') {
-    query = query.orderBy('products.current_price', 'asc');
-  } else if (sort === 'price_desc') {
-    query = query.orderBy('products.current_price', 'desc');
-  } else if (sort === 'newest') {
-    query = query.orderBy('products.created_at', 'desc');
-  } else if (sort === 'oldest') {
-    query = query.orderBy('products.created_at', 'asc');
-  } else {
-    // Default: sort by end_at ascending (ending soonest first)
-    query = query.orderBy('products.end_at', 'asc');
-  }
-
-  return query.limit(limit).offset(offset);
+  return applySearchSort(query, sort).limit(limit).offset(offset);
 }
 
 // 2. Hàm đếm tổng số lượng (Simplified)
 export function countByKeywords(keywords, logic = 'or') {
-  // Remove accents from keywords for search
-  const searchQuery = keywords.toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+  const searchQuery =   (keywords);
+  const words = parseSearchWords(searchQuery);
   
   return db('products')
     .leftJoin('categories', 'products.category_id', 'categories.id')
@@ -227,28 +237,7 @@ export function countByKeywords(keywords, logic = 'or') {
     // Chỉ đếm sản phẩm ACTIVE
     .where('products.end_at', '>', new Date())
     .whereNull('products.closed_at')
-    .where((builder) => {
-      const words = searchQuery.split(/\s+/).filter(w => w.length > 0);
-      if (logic === 'and') {
-        // AND logic: all keywords must match
-        words.forEach(word => {
-          builder.where(function() {
-            this.whereRaw(`LOWER(remove_accents(products.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(categories.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(parent_category.name)) LIKE ?`, [`%${word}%`]);
-          });
-        });
-      } else {
-        // OR logic: any keyword can match in product name OR category name OR parent category name
-        words.forEach(word => {
-          builder.orWhere(function() {
-            this.whereRaw(`LOWER(remove_accents(products.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(categories.name)) LIKE ?`, [`%${word}%`])
-              .orWhereRaw(`LOWER(remove_accents(parent_category.name)) LIKE ?`, [`%${word}%`]);
-          });
-        });
-      }
-    })
+    .where((builder) => applyKeywordFilter(builder, words, logic))
     .count('products.id as count')
     .first();
 }
