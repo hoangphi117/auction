@@ -98,11 +98,6 @@ router.post('/add', async function (req, res) {
 router.get('/detail/:id', async (req, res) => {
     const id = req.params.id;
     const product = await productModel.findByProductIdForAdmin(id);
-    // console.log(product);
-    const success_message = req.session.success_message;
-    const error_message = req.session.error_message;
-    delete req.session.success_message;
-    delete req.session.error_message
     res.render('vwAdmin/product/detail', { product } );
 });
 
