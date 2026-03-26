@@ -42,26 +42,3 @@ export async function getMessagesByOrderId(orderId) {
     .orderBy('order_chats.created_at', 'asc');
 }
 
-/**
- * Xóa tin nhắn
- */
-export async function deleteMessage(messageId) {
-  return db('order_chats')
-    .where('id', messageId)
-    .del();
-}
-
-/**
- * Lấy tin nhắn mới nhất của order
- */
-export async function getLatestMessage(orderId) {
-  return db('order_chats')
-    .leftJoin('users as sender', 'order_chats.sender_id', 'sender.id')
-    .where('order_chats.order_id', orderId)
-    .select(
-      'order_chats.*',
-      'sender.fullname as sender_name'
-    )
-    .orderBy('order_chats.created_at', 'desc')
-    .first();
-}
