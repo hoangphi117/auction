@@ -6,6 +6,12 @@ import * as authService from '../services/AuthService.js';
 import * as userService from '../services/UserService.js';
 import * as auctionService from '../services/AuctionService.js';
 
+import {
+  validateSignup,
+  validateResetPassword,
+  validateOtp
+} from '../middlewares/validation.mdw.js';
+
 import { PaginationHelper } from '../utils/pagination.js';
 
 const router = express.Router();
@@ -100,8 +106,8 @@ router.post('/resend-forgot-password-otp', async (req, res) => {
   }
 });
 
-router.post('/reset-password', async (req, res) => {
-  const { email, new_password, confirm_new_password } = req.body;
+router.post('/reset-password',validateResetPassword, async (req, res) => {
+  const { email, new_password } = req.body;
 
   if (new_password !== confirm_new_password) {
     return res.render('vwAccount/auth/reset-password', {
@@ -153,27 +159,7 @@ router.post('/signin', async (req, res) => {
 
 /* ===================== SIGNUP ===================== */
 
-router.post('/signup', async (req, res) => {
-  const { fullname, email, address, password, confirmPassword } = req.body;
-
-  const errors = {};
-  const old = { fullname, email, address };
-
-  if (!fullname) errors.fullname = 'Full name is required';
-  if (!address) errors.address = 'Address is required';
-  if (!email) errors.email = 'Email is required';
-  if (!password) errors.password = 'Password is required';
-  if (password !== confirmPassword)
-    errors.confirmPassword = 'Passwords do not match';
-
-  if (Object.keys(errors).length > 0) {
-    return res.render('vwAccount/auth/signup', {
-      errors,
-      old,
-      error_message: 'Please correct the errors below.'
-    });
-  }
-
+router.post('/signup',validateSignup, async (req, res) => {
   try {
     await authService.signup({ fullname, email, address, password });
 
@@ -188,7 +174,7 @@ router.post('/signup', async (req, res) => {
 
 /* ===================== VERIFY EMAIL ===================== */
 
-router.post('/verify-email', async (req, res) => {
+router.post('/verify-email',validateOtp, async (req, res) => {
   const { email, otp } = req.body;
 
   try {
