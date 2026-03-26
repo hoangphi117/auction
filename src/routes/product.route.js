@@ -551,36 +551,6 @@ router.get('/bid-history/:productId', async (req, res) => {
     console.error('Get bid history error:', error);
     res.status(500).json({ success: false, message: 'Unable to load bidding history' });
   }
-  const result = await productModel.findByProductId(productId);
-  const relatedProducts = await productModel.findRelatedProducts(productId);
-  const product = {
-    thumbnail: result[0].thumbnail,
-    sub_images: result.reduce((acc, curr) => {
-      if (curr.img_link) {
-        acc.push(curr.img_link);
-      }
-      return acc;
-    }, []),
-    id: result[0].id,
-    name: result[0].name,
-    starting_price: result[0].starting_price,
-    current_price: result[0].current_price,
-    seller_id: result[0].seller_id,
-    seller_fullname: result[0].seller_name,
-    seller_rating: result[0].seller_rating_plus / (result[0].seller_rating_plus + result[0].seller_rating_minus),
-    seller_member_since: new Date(result[0].seller_created_at).getFullYear(),
-    buy_now_price: result[0].buy_now_price,
-    seller_id: result[0].seller_id,
-    hightest_bidder_id: result[0].highest_bidder_id,
-    bidder_name: result[0].bidder_name,
-    category_name: result[0].category_name,
-    bid_count: result[0].bid_count,
-    created_at: result[0].created_at,
-    end_at: result[0].end_at,
-    description: result[0].description,
-    related_products: relatedProducts
-  }
-  res.render('vwProduct/details', { product });
 });
 
 // ROUTE: COMPLETE ORDER PAGE (For PENDING products)
