@@ -59,7 +59,6 @@ app.engine('handlebars', engine({
   helpers: {
     section: expressHandlebarsSections(),
     eq(a, b) { return a === b; },
-    add(a, b) { return a + b; },
     format_number(price) { return new Intl.NumberFormat('en-US').format(price); },
     mask_name(fullname) {
       if (!fullname) return null;
@@ -220,15 +219,11 @@ app.engine('handlebars', engine({
     gt(a, b) { 
       return a > b; 
     },
-    gte(a, b) { return a >= b; },
     lt(a, b) { 
       return a < b; 
     },
     ne(a, b) {
       return a !== b;
-    },
-    lte(a, b) { 
-      return a <= b; 
     },
     gte(a, b) { 
       return a >= b; 
