@@ -498,29 +498,11 @@ router.post('/comment', isAuthenticated, async (req, res) => {
       // Send email to each recipient
       for (const [recipientId, recipient] of recipientsMap) {
         try {
-          await sendMail({
-            to: recipient.email,
-            subject: `Seller answered a question on: ${product.name}`,
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #667eea;">Seller Response on Product</h2>
-                <p>Dear <strong>${recipient.fullname}</strong>,</p>
-                <p>The seller has responded to a question on a product you're interested in:</p>
-                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                  <p><strong>Product:</strong> ${product.name}</p>
-                  <p><strong>Seller:</strong> ${seller.fullname}</p>
-                  <p><strong>Answer:</strong></p>
-                  <p style="background-color: white; padding: 15px; border-radius: 5px; border-left: 4px solid #667eea;">${content}</p>
-                </div>
-                <div style="text-align: center; margin: 30px 0;">
-                  <a href="${productUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                    View Product
-                  </a>
-                </div>
-                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                <p style="color: #888; font-size: 12px;">This is an automated message from Online Auction. Please do not reply to this email.</p>
-              </div>
-            `
+          await EmailService.sendSellerReplyNotification(recipient, {
+            productName: product.name,
+            sellerName: seller.fullname,
+            answer: content,
+            productUrl
           });
         } catch (emailError) {
           console.error(`Failed to send email to ${recipient.email}:`, emailError);
@@ -530,48 +512,20 @@ router.post('/comment', isAuthenticated, async (req, res) => {
     } else if (seller && seller.email && userId !== product.seller_id) {
       // Non-seller commenting - send email to seller
       if (parentId) {
-        // This is a reply - send "New Reply" email
-        await sendMail({
-          to: seller.email,
-          subject: `New reply on your product: ${product.name}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #667eea;">New Reply on Your Product</h2>
-              <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                <p><strong>Product:</strong> ${product.name}</p>
-                <p><strong>From:</strong> ${commenter.fullname}</p>
-                <p><strong>Reply:</strong></p>
-                <p style="background-color: white; padding: 15px; border-radius: 5px;">${content}</p>
-              </div>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${productUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                  View Product & Reply
-                </a>
-              </div>
-            </div>
-          `
+        await EmailService.sendCommentNotificationToSeller(seller, {
+          productName: product.name,
+          commenterName: commenter.fullname,
+          contentText: content,
+          productUrl,
+          isReply: true
         });
       } else {
-        // This is a new question - send "New Question" email
-        await sendMail({
-          to: seller.email,
-          subject: `New question about your product: ${product.name}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #667eea;">New Question About Your Product</h2>
-              <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                <p><strong>Product:</strong> ${product.name}</p>
-                <p><strong>From:</strong> ${commenter.fullname}</p>
-                <p><strong>Question:</strong></p>
-                <p style="background-color: white; padding: 15px; border-radius: 5px;">${content}</p>
-              </div>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${productUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                  View Product & Answer
-                </a>
-              </div>
-            </div>
-          `
+        await EmailService.sendCommentNotificationToSeller(seller, {
+          productName: product.name,
+          commenterName: commenter.fullname,
+          contentText: content,
+          productUrl,
+          isReply: false
         });
       }
     }
@@ -1232,34 +1186,10 @@ router.post('/reject-bidder', isAuthenticated, async (req, res) => {
     // Send email notification to rejected bidder (outside transaction) - asynchronously
     if (rejectedBidderInfo && rejectedBidderInfo.email && productInfo) {
       // Don't await - send email in background
-      sendMail({
-        to: rejectedBidderInfo.email,
-        subject: `Your bid has been rejected: ${productInfo.name}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <div style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-              <h1 style="color: white; margin: 0;">Bid Rejected</h1>
-            </div>
-            <div style="background-color: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-              <p>Dear <strong>${rejectedBidderInfo.fullname}</strong>,</p>
-              <p>We regret to inform you that the seller has rejected your bid on the following product:</p>
-              <div style="background-color: white; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #dc3545;">
-                <h3 style="margin: 0 0 10px 0; color: #333;">${productInfo.name}</h3>
-                <p style="margin: 5px 0; color: #666;"><strong>Seller:</strong> ${sellerInfo ? sellerInfo.fullname : 'N/A'}</p>
-              </div>
-              <p style="color: #666;">This means you can no longer place bids on this specific product. Your previous bids on this product have been removed.</p>
-              <p style="color: #666;">You can still participate in other auctions on our platform.</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${req.protocol}://${req.get('host')}/" style="display: inline-block; background: linear-gradient(135deg, #72AEC8 0%, #5a9ab8 100%); color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                  Browse Other Auctions
-                </a>
-              </div>
-              <p style="color: #888; font-size: 13px;">If you believe this was done in error, please contact our support team.</p>
-            </div>
-            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-            <p style="color: #888; font-size: 12px; text-align: center;">This is an automated message from Online Auction. Please do not reply to this email.</p>
-          </div>
-        `
+      EmailService.sendBidRejectedNotification(rejectedBidderInfo, {
+        productName: productInfo.name,
+        sellerName: sellerInfo ? sellerInfo.fullname : null,
+        homeUrl: `${req.protocol}://${req.get('host')}/`
       }).then(() => {
         console.log(`Rejection email sent to ${rejectedBidderInfo.email} for product #${productId}`);
       }).catch((emailError) => {

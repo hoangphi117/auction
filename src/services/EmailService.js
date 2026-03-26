@@ -171,6 +171,90 @@ ${wasOutbid ? `
     });
   }
 
+  static async sendSellerReplyNotification(recipient, { productName, sellerName, answer, productUrl }) {
+    const content = `
+<p>Dear <strong>${recipient.fullname}</strong>,</p>
+<p>The seller has responded to a question on a product you're interested in:</p>
+<div style="background-color: white; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #667eea;">
+  <p><strong>Product:</strong> ${productName}</p>
+  <p><strong>Seller:</strong> ${sellerName}</p>
+  <p><strong>Answer:</strong></p>
+  <p style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">${answer}</p>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+  <a href="${productUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+    View Product
+  </a>
+</div>
+    `.trim();
+
+    const html = this.getBaseEmailTemplate('Seller Response on Product', '#667eea', '#5a67d8', content);
+
+    return sendMail({
+      to: recipient.email,
+      subject: `Seller answered a question on: ${productName}`,
+      html
+    });
+  }
+
+  static async sendCommentNotificationToSeller(seller, { productName, commenterName, contentText, productUrl, isReply }) {
+    const title = isReply ? 'New Reply on Your Product' : 'New Question About Your Product';
+    const subject = isReply
+      ? `New reply on your product: ${productName}`
+      : `New question about your product: ${productName}`;
+    const label = isReply ? 'Reply' : 'Question';
+    const buttonText = isReply ? 'View Product & Reply' : 'View Product & Answer';
+
+    const content = `
+<div style="background-color: white; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #667eea;">
+  <p><strong>Product:</strong> ${productName}</p>
+  <p><strong>From:</strong> ${commenterName}</p>
+  <p><strong>${label}:</strong></p>
+  <p style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">${contentText}</p>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+  <a href="${productUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+    ${buttonText}
+  </a>
+</div>
+    `.trim();
+
+    const html = this.getBaseEmailTemplate(title, '#667eea', '#5a67d8', content);
+
+    return sendMail({
+      to: seller.email,
+      subject,
+      html
+    });
+  }
+
+  static async sendBidRejectedNotification(rejectedBidderInfo, { productName, sellerName, homeUrl }) {
+    const content = `
+<p>Dear <strong>${rejectedBidderInfo.fullname}</strong>,</p>
+<p>We regret to inform you that the seller has rejected your bid on the following product:</p>
+<div style="background-color: white; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #dc3545;">
+  <h3 style="margin: 0 0 10px 0; color: #333;">${productName}</h3>
+  <p style="margin: 5px 0; color: #666;"><strong>Seller:</strong> ${sellerName || 'N/A'}</p>
+</div>
+<p style="color: #666;">This means you can no longer place bids on this specific product. Your previous bids on this product have been removed.</p>
+<p style="color: #666;">You can still participate in other auctions on our platform.</p>
+<div style="text-align: center; margin: 30px 0;">
+  <a href="${homeUrl}" style="display: inline-block; background: linear-gradient(135deg, #72AEC8 0%, #5a9ab8 100%); color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+    Browse Other Auctions
+  </a>
+</div>
+<p style="color: #888; font-size: 13px;">If you believe this was done in error, please contact our support team.</p>
+    `.trim();
+
+    const html = this.getBaseEmailTemplate('Bid Rejected', '#dc3545', '#c82333', content);
+
+    return sendMail({
+      to: rejectedBidderInfo.email,
+      subject: `Your bid has been rejected: ${productName}`,
+      html
+    });
+  }
+
   static async sendBidNotifications({ seller, currentBidder, previousBidder, productName, newCurrentPrice, previousPrice, bidAmount, newHighestBidderId, userId, previousHighestBidderId, priceChanged, productSold, productUrl }) {
     const emailPromises = [];
     const isWinning = newHighestBidderId === userId;
