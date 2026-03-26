@@ -45,6 +45,90 @@ const prepareProductList = async (products) => {
   });
 };
 
+const resolveProductDetailAccess = async (productId, product, userId) => {
+  const now = new Date();
+  const endDate = new Date(product.end_at);
+
+  if (endDate <= now && !product.closed_at && product.is_sold === null) {
+    await productModel.updateProduct(productId, { closed_at: endDate });
+    product.closed_at = endDate;
+  }
+
+  const productStatus = determineProductStatus(product);
+
+  if (productStatus === 'ACTIVE') {
+    return { productStatus, canView: true };
+  }
+
+  if (!userId) {
+    return { productStatus, canView: false };
+  }
+
+  const isSeller = product.seller_id === userId;
+  const isHighestBidder = product.highest_bidder_id === userId;
+  return { productStatus, canView: isSeller || isHighestBidder };
+};
+
+const loadProductDetailData = async ({ productId, product, authUser, commentPage, productStatus, commentsPerPage = 2 }) => {
+  const offset = (commentPage - 1) * commentsPerPage;
+
+  const [descriptionUpdates, biddingHistory, comments, totalComments] = await Promise.all([
+    productDescUpdateModel.findByProductId(productId),
+    biddingHistoryModel.getBiddingHistory(productId),
+    productCommentModel.getCommentsByProductId(productId, commentsPerPage, offset),
+    productCommentModel.countCommentsByProductId(productId)
+  ]);
+
+  if (comments.length > 0) {
+    const commentIds = comments.map(c => c.id);
+    const allReplies = await productCommentModel.getRepliesByCommentIds(commentIds);
+
+    const repliesMap = new Map();
+    for (const reply of allReplies) {
+      if (!repliesMap.has(reply.parent_id)) {
+        repliesMap.set(reply.parent_id, []);
+      }
+      repliesMap.get(reply.parent_id).push(reply);
+    }
+
+    for (const comment of comments) {
+      comment.replies = repliesMap.get(comment.id) || [];
+    }
+  }
+
+  const rejectedBidders = authUser && product.seller_id === authUser.id
+    ? await rejectedBidderModel.getRejectedBidders(productId)
+    : [];
+
+  const sellerRatingObject = await reviewModel.calculateRatingPoint(product.seller_id);
+  const sellerReviews = await reviewModel.getReviewsByUserId(product.seller_id);
+
+  let bidderRatingObject = { rating_point: null };
+  let bidderReviews = [];
+  if (product.highest_bidder_id) {
+    bidderRatingObject = await reviewModel.calculateRatingPoint(product.highest_bidder_id);
+    bidderReviews = await reviewModel.getReviewsByUserId(product.highest_bidder_id);
+  }
+
+  const showPaymentButton = !!authUser
+    && productStatus === 'PENDING'
+    && (product.seller_id === authUser.id || product.highest_bidder_id === authUser.id);
+
+  return {
+    descriptionUpdates,
+    biddingHistory,
+    comments,
+    totalComments,
+    totalPages: Math.ceil(totalComments / commentsPerPage),
+    rejectedBidders,
+    seller_rating_point: sellerRatingObject.rating_point,
+    seller_has_reviews: sellerReviews.length > 0,
+    bidder_rating_point: bidderRatingObject.rating_point,
+    bidder_has_reviews: bidderReviews.length > 0,
+    showPaymentButton
+  };
+};
+
 router.get('/category', async (req, res) => {
   const userId = req.session.authUser ? req.session.authUser.id : null;
   const sort = req.query.sort || '';
@@ -138,121 +222,47 @@ router.get('/detail', async (req, res) => {
   if (!product) {
     return res.status(404).render('404', { message: 'Product not found' });
   }
+
   console.log('Product details:', product);
-  // Determine product status
-  const now = new Date();
-  const endDate = new Date(product.end_at);
-  
-  // Auto-close auction if time expired and not yet closed
-  if (endDate <= now && !product.closed_at && product.is_sold === null) {
-    // Update closed_at to mark auction end time
-    await productModel.updateProduct(productId, { closed_at: endDate });
-    product.closed_at = endDate; // Update local object
-  }
-  
-  const productStatus = determineProductStatus(product);
-  
-  // Authorization check: Non-ACTIVE products can only be viewed by seller or highest bidder
-  if (productStatus !== 'ACTIVE') {
-    if (!userId) {
-      // User not logged in, cannot view non-active products
-      return res.status(403).render('403', { message: 'You do not have permission to view this product' });
-    }
-    
-    const isSeller = product.seller_id === userId;
-    const isHighestBidder = product.highest_bidder_id === userId;
-    
-    if (!isSeller && !isHighestBidder) {
-      return res.status(403).render('403', { message: 'You do not have permission to view this product' });
-    }
+
+  const access = await resolveProductDetailAccess(productId, product, userId);
+  if (!access.canView) {
+    return res.status(403).render('403', { message: 'You do not have permission to view this product' });
   }
 
-  // Pagination for comments
   const commentPage = parseInt(req.query.commentPage) || 1;
-  const commentsPerPage = 2; // 2 comments per page
-  const offset = (commentPage - 1) * commentsPerPage;
+  const detailData = await loadProductDetailData({
+    productId,
+    product,
+    authUser: req.session.authUser,
+    commentPage,
+    productStatus: access.productStatus
+  });
 
-  // Load description updates, bidding history, and comments in parallel
-  const [descriptionUpdates, biddingHistory, comments, totalComments] = await Promise.all([
-    productDescUpdateModel.findByProductId(productId),
-    biddingHistoryModel.getBiddingHistory(productId),
-    productCommentModel.getCommentsByProductId(productId, commentsPerPage, offset),
-    productCommentModel.countCommentsByProductId(productId)
-  ]);
-
-  // Load rejected bidders (only for seller)
-  let rejectedBidders = [];
-  if (req.session.authUser && product.seller_id === req.session.authUser.id) {
-    rejectedBidders = await rejectedBidderModel.getRejectedBidders(productId);
-  }
-  
-  // Load replies for all comments in one batch to avoid N+1 query problem
-  if (comments.length > 0) {
-    const commentIds = comments.map(c => c.id);
-    const allReplies = await productCommentModel.getRepliesByCommentIds(commentIds);
-    
-    // Group replies by parent comment id
-    const repliesMap = new Map();
-    for (const reply of allReplies) {
-      if (!repliesMap.has(reply.parent_id)) {
-        repliesMap.set(reply.parent_id, []);
-      }
-      repliesMap.get(reply.parent_id).push(reply);
-    }
-    
-    // Attach replies to their parent comments
-    for (const comment of comments) {
-      comment.replies = repliesMap.get(comment.id) || [];
-    }
-  }
-  
-  // Calculate total pages
-  const totalPages = Math.ceil(totalComments / commentsPerPage);
-  
-  // Get flash messages from session
   const success_message = req.session.success_message;
   const error_message = req.session.error_message;
   delete req.session.success_message;
   delete req.session.error_message;
-
-  // Get seller rating
-  const sellerRatingObject = await reviewModel.calculateRatingPoint(product.seller_id);
-  const sellerReviews = await reviewModel.getReviewsByUserId(product.seller_id);
-  
-  // Get bidder rating (if exists)
-  let bidderRatingObject = { rating_point: null };
-  let bidderReviews = [];
-  if (product.highest_bidder_id) {
-    bidderRatingObject = await reviewModel.calculateRatingPoint(product.highest_bidder_id);
-    bidderReviews = await reviewModel.getReviewsByUserId(product.highest_bidder_id);
-  }
-  
-  // Check if should show payment button (for seller or highest bidder when status is PENDING)
-  let showPaymentButton = false;
-  if (req.session.authUser && productStatus === 'PENDING') {
-    const userId = req.session.authUser.id;
-    showPaymentButton = (product.seller_id === userId || product.highest_bidder_id === userId);
-  }
   
   res.render('vwProduct/details', { 
     product,
-    productStatus, // Pass status to view
+    productStatus: access.productStatus,
     authUser: req.session.authUser, // Pass authUser for checking highest_bidder_id
-    descriptionUpdates,
-    biddingHistory,
-    rejectedBidders,
-    comments,
+    descriptionUpdates: detailData.descriptionUpdates,
+    biddingHistory: detailData.biddingHistory,
+    rejectedBidders: detailData.rejectedBidders,
+    comments: detailData.comments,
     success_message,
     error_message,
     related_products,
-    seller_rating_point: sellerRatingObject.rating_point,
-    seller_has_reviews: sellerReviews.length > 0,
-    bidder_rating_point: bidderRatingObject.rating_point,
-    bidder_has_reviews: bidderReviews.length > 0,
+    seller_rating_point: detailData.seller_rating_point,
+    seller_has_reviews: detailData.seller_has_reviews,
+    bidder_rating_point: detailData.bidder_rating_point,
+    bidder_has_reviews: detailData.bidder_has_reviews,
     commentPage,
-    totalPages,
-    totalComments,
-    showPaymentButton
+    totalPages: detailData.totalPages,
+    totalComments: detailData.totalComments,
+    showPaymentButton: detailData.showPaymentButton
   });
 });
 
