@@ -6,9 +6,7 @@ import session from 'express-session';
 import methodOverride from 'method-override';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer';
-import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
+
 import passport from './utils/passport.js';
 
 // Import Scheduled Jobs
@@ -66,7 +64,6 @@ app.engine('handlebars', engine({
   helpers: {
     section: expressHandlebarsSections(),
     eq(a, b) { return a === b; },
-    add(a, b) { return a + b; },
     format_number(price) { return new Intl.NumberFormat('en-US').format(price); },
     mask_name(fullname) {
       if (!fullname) return null;
@@ -227,15 +224,11 @@ app.engine('handlebars', engine({
     gt(a, b) { 
       return a > b; 
     },
-    gte(a, b) { return a >= b; },
     lt(a, b) { 
       return a < b; 
     },
     ne(a, b) {
       return a !== b;
-    },
-    lte(a, b) { 
-      return a <= b; 
     },
     gte(a, b) { 
       return a >= b; 
@@ -275,24 +268,7 @@ app.engine('handlebars', engine({
 app.set('view engine', 'handlebars');
 app.set('views', './views');
 
-// Tạo thư mục uploads nếu chưa có
-const uploadDir = path.join(__dirname, 'public', 'images', 'products');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
 
-// File filter (chỉ cho phép ảnh)
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (mimetype && extname) {
-    return cb(null, true);
-  } else {
-    cb(new Error('Only image files (jpeg, jpg, png, webp) are allowed!'));
-  }
-};
 
 // ============================================================
 // 3. MIDDLEWARE TOÀN CỤC (Chạy cho mọi request)
