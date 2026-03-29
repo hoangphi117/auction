@@ -1,5 +1,5 @@
 import express from 'express';
-import * as AdminProductService from '../services/AdminProductService.js';
+import * as AdminProductService from '../../services/AdminProductService.js';
 import multer from 'multer';
 
 const router = express.Router();
